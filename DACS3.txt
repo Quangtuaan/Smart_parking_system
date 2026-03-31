@@ -1,0 +1,183 @@
+#include <Wire.h>
+#include <LiquidCrystal_PCF8574.h>
+#include <SPI.h>
+#include <MFRC522.h>
+#include <ESP32Servo.h>    
+
+
+LiquidCrystal_PCF8574 lcd(0x27);SPI.h
+
+
+#define SS_PIN 5
+#define RST_PIN 4
+MFRC522 rfid(SS_PIN, RST_PIN);
+
+
+Servo servoIn, servoOut;
+const int entrySensor = 33;   
+const int servoInPin = 32;    
+const int servoOutPin = 13;   
+
+
+const int buzzer = 15;
+const int sensors[] = {12, 14, 27, 25}; 
+
+
+int totalSpots = 4;     
+int occupiedSpots = 0; 
+bool carDetected = false;
+bool previousDetection = false; 
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("Bắt đầu khởi tạo");
+
+ 
+  Wire.begin();
+  lcd.begin(16, 2);
+  lcd.setBacklight(255);
+  lcd.setCursor(0, 0);
+  lcd.print("Khoi tao OK");
+
+  // Khởi tạo RFID
+  SPI.begin();
+  rfid.PCD_Init();
+  Serial.println("RFID được khởi tạo");
+
+  // Khởi tạo Servo
+  servoIn.attach(servoInPin);
+  servoOut.attach(servoOutPin);
+  servoIn.write(0);   
+  servoOut.write(0); 
+  Serial.println("Servo đã được khởi tạo");
+
+
+  pinMode(buzzer, OUTPUT);
+
+  for (int i = 0; i < 4; i++) {
+    pinMode(sensors[i], INPUT);
+  }
+
+ // cb xe vao
+  pinMode(entrySensor, INPUT);
+  Serial.println("Cảm biến đã được khởi tạo");
+
+  updateDisplay();  
+}
+
+void loop() {
+  carDetected = digitalRead(entrySensor) == LOW;
+
+  if (carDetected && !previousDetection) {
+    Serial.println("Phát hiện xe vào");
+    handleEntry();
+  }
+
+ 
+  previousDetection = carDetected;
+
+  
+  int newOccupiedSpots = checkSensors(); //p/hien xe
+  if (newOccupiedSpots != occupiedSpots) {
+    occupiedSpots = newOccupiedSpots;
+    updateDisplay();
+  }
+
+  if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+    Serial.println("Phát hiện thẻ");
+    if (checkCard()) {
+      beep();  
+      handleExit(); 
+    }
+    rfid.PICC_HaltA();  
+  }
+}
+
+
+int checkSensors() {
+  int count = 0;
+  for (int i = 0; i < 4; i++) {
+    if (digitalRead(sensors[i]) == LOW) {  
+      count++;
+    }
+  }
+  Serial.print("Số xe hiện tại: ");
+  Serial.println(count);
+  return count;
+}
+
+
+void updateDisplay() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("xe trong bai:");
+  lcd.print(occupiedSpots);
+  lcd.print("/");
+  lcd.print(totalSpots);
+  Serial.print("Cập nhật LCD: ");
+  Serial.print(occupiedSpots);
+  Serial.print("/");
+  Serial.println(totalSpots);
+}
+bool checkCard() {
+  Serial.println("Thẻ hợp lệ");
+  return true;
+}
+
+
+void handleEntry() {
+  if (occupiedSpots < totalSpots) {  // Kiểm tra nếu số xe hiện tại nhỏ hơn số chỗ tổng
+    // Mở cửa vào bằng servo
+    servoIn.write(90);  
+    lcd.setCursor(0, 1);
+    lcd.print("Dang mo cua vao");
+    Serial.println("Mở cửa vào");
+    delay(3000); 
+
+    servoIn.write(0);  
+    Serial.println("Đóng cửa vào");
+
+  
+    occupiedSpots++;
+    updateDisplay();
+  } else {
+   
+    lcd.setCursor(0, 1);
+    lcd.print("Bai da day     ");
+    Serial.println("Bãi đã đầy, không mở cửa vào");
+  }
+}
+
+
+void handleExit() {
+  if (occupiedSpots > 0) {
+    // Mở cửa ra bằng servo
+    servoOut.write(90);
+    lcd.setCursor(0, 1);
+    lcd.print("Dang mo cua ra ");
+    Serial.println("Mở cửa ra");
+
+    delay(3000); 
+
+    servoOut.write(0); 
+    Serial.println("Đóng cửa ra");
+
+    // Giảm số xe trong bãi
+    occupiedSpots--;
+    updateDisplay();
+  } else {
+   
+    lcd.setCursor(0, 1);
+    lcd.print("Khong co xe ra ");
+    Serial.println("Không có xe để ra");
+  }
+}
+
+
+void beep() {
+  digitalWrite(buzzer, HIGH);
+  delay(100);
+  digitalWrite(buzzer, LOW);
+  Serial.println("Buzzer kêu");
+}
+ 
